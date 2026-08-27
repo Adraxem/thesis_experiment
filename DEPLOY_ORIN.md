@@ -170,3 +170,32 @@ Then open `pareto_surface.m` in MATLAB for the interactive surface of the REAL d
   `power/telemetry.py` (`_HWMON_GLOBS`).
 - Thermal throttling mid-sweep is EXPECTED and is part of what you're studying — add
   `--repeats` and a cooldown between heavy configs if you want steady-state numbers.
+
+---
+
+## 7b. REAL training with per-epoch + per-time power (train_capture.py)
+This does genuine epoch-based training on real data and logs power the whole time.
+Time is bounded by `--epochs` and `--max-steps-per-epoch`.
+
+```bash
+# Vision: train ResNet-18 on CIFAR-10 for 3 real epochs (downloads CIFAR once).
+python3 train_capture.py --model resnet18 --epochs 3 --batch-size 64 \
+    --power-mode MAXN --save-ckpt
+
+# LLM: QLoRA fine-tune Llama-3.2-1B (backprop ONLY through adapters). Cap steps to
+# keep it short; a large model is never full-trained on the Nano.
+python3 train_capture.py --model llama3.2-1b --epochs 1 \
+    --max-steps-per-epoch 200 --seq-len 128 --save-ckpt
+```
+Outputs:
+- `data/train_epochs.csv`  — one row per epoch: loss + avg/peak power + energy + temp.
+- `data/train_traces/<tag>.csv` — the full per-time waveform, each sample tagged by epoch.
+- `results/checkpoints/<tag>.*` — trained weights (vision) / LoRA adapters (LLM).
+
+Rough time on an Orin Nano (guidance, not a promise): ResNet-18 on CIFAR at imgsz=224
+is minutes/epoch; drop `--imgsz 32` or use `--max-steps-per-epoch` to shorten. The LLM
+QLoRA step is cheap per step; 200 steps is short. Full-weight training of a large model
+is intentionally not supported — LoRA is the feasible path.
+
+Needs `transformers` + `peft` for the LLM (`pip install transformers peft accelerate`)
+and `torchvision` for CIFAR (Jetson wheel).

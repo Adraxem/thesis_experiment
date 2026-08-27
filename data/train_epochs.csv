@@ -1,0 +1,4 @@
+model,precision,mode,batch_size,power_mode,epoch,loss,steps,epoch_time_s,p_avg_w,p_peak_w,energy_j,thermal_ramp_c_per_s,temp_max_c,trace_source,backend
+resnet18,FP16,train,64,MAXN,0,2.3336,20,0.401,46.765,53.54,18.219,30.6344,48.42,mock,stub-train
+resnet18,FP16,train,64,MAXN,1,1.77581,20,0.4,43.828,51.927,17.153,15.8818,54.3,mock,stub-train
+resnet18,FP16,train,64,MAXN,2,1.35208,20,0.401,46.405,53.217,17.629,9.2328,56.87,mock,stub-train
