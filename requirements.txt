@@ -1,0 +1,20 @@
+# Core (laptop dev + Orin)
+numpy>=1.24
+pandas>=2.0
+scikit-learn>=1.3
+matplotlib>=3.7
+
+# Predictor (RQ2). torch is optional; the predictor falls back to sklearn if torch is missing.
+# On the Jetson Orin, install the NVIDIA-provided torch wheel for JetPack, NOT pip torch.
+torch>=2.1 ; platform_machine != "aarch64"
+
+# Inference models (install as available on your platform)
+torchvision>=0.16 ; platform_machine != "aarch64"
+onnx>=1.15
+onnxruntime>=1.17 ; platform_machine != "aarch64"
+ultralytics>=8.1            # YOLO
+transformers>=4.44          # Llama-3.2-1B
+# tensorrt + pycuda come from JetPack on the Orin (do not pip install on device)
+
+# Jetson telemetry (device only)
+jetson-stats>=4.2 ; platform_machine == "aarch64"   # provides jtop / jetson_stats
