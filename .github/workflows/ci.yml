@@ -1,0 +1,37 @@
+name: CI
+
+# Runs the pipeline on synthetic data every push/PR to prove nothing is broken.
+# Gives you a green check on commits + a badge for the README (and feeds GitHub Actions).
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pandas scikit-learn matplotlib scipy
+
+      - name: Byte-compile all modules
+        run: python -m compileall config.py run_sweep.py train_capture.py power models predictor optimizer datacenter
+
+      - name: Smoke test the pipeline (synthetic power)
+        run: |
+          python run_sweep.py --smoke --modes inference train
+          python -m predictor.synthetic
+          python -m predictor.train_predictor
+          python make_figures.py
+          python export_for_matlab.py
