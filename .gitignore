@@ -1,26 +1,9 @@
-# Python
 __pycache__/
 *.pyc
-*.pyo
-
-# virtual environments (never commit these)
-.venv/
-venv/
-thesisenv/
-env/
-
-# big/regenerable binary artifacts
+*.bak
 *.onnx
-*.engine
-*.trt
-
-# OS junk
-.DS_Store
-Thumbs.db
-
-# Word temp files
-~$*
-
-# Note: data/ and results/ ARE tracked on purpose — your measured CSVs and
-# figures are worth keeping in history. Delete those lines here if you'd rather
-# keep the repo code-only.
+results/traces/
+data/datasets/
+data/train_traces/
+results/checkpoints/
+thesisenv/

@@ -4,20 +4,17 @@ run_sweep.py — the RQ1 data-collection driver.
 For every DeployConfig in the sweep:
   1. (on Orin) set the power mode via nvpmodel,
   2. load the model, warm up,
-  3. start the PowerLogger, run N timed inferences, stop the logger,
+  3. start the PowerLogger, run N timed inferences (or training steps), stop it,
   4. extract the waveform features,
-  5. append one row {config fields + waveform features} to the dataset CSV.
-
-This CSV is the "config -> power waveform" dataset that does not exist today
-(Contribution 1). It feeds the predictor (RQ2) and optimizer (RQ3).
-
-Run on the laptop to smoke-test end-to-end (synthetic power); run on the Orin Nano
-to collect real data.
+  5. append one row {config fields + waveform features} to the dataset CSV,
+  6. SAVE the raw per-time trace to results/traces/<tag>_r<rep>.csv so the
+     power-over-time and energy-over-time figures use REAL data (not synthetic).
 
 Examples:
-    python run_sweep.py --smoke              # tiny synthetic sweep
-    python run_sweep.py --iters 200 --out data/waveforms.csv
-    python run_sweep.py --models resnet18 llama3.2-1b --precisions FP16 INT8
+    python run_sweep.py --smoke --modes inference train
+    python run_sweep.py --iters 200 --modes inference train \
+        --models resnet18 mobilenet_v3_large --precisions FP16 \
+        --batch-sizes 1 4 8 --power-modes 15W 25W MAXN --out data/waveforms.csv
 """
 from __future__ import annotations
 import argparse
@@ -25,6 +22,7 @@ import os
 import subprocess
 import time
 
+import numpy as np
 import pandas as pd
 
 import config
@@ -32,7 +30,12 @@ from models.base import make_runner
 from power.telemetry import PowerLogger, IS_JETSON
 from power.waveform_features import extract_features, WaveformFeatures
 
-NVPMODEL_IDS = {"7W": 3, "15W": 2, "25W": 1, "MAXN": 0}  # confirm with `nvpmodel -q` on YOUR board!
+# Power-mode name -> nvpmodel id. DEFAULT is the Jetson Orin Nano (Super) layout
+# confirmed via `nvpmodel -q` (15W=0, 25W=1, MAXN_SUPER=2). Verify on YOUR board
+# with:  grep POWER_MODEL /etc/nvpmodel.conf
+NVPMODEL_IDS = {"MAXN": 2, "25W": 1, "15W": 0}
+
+TRACE_DIR = "results/traces"
 
 
 def set_power_mode(mode: str):
@@ -40,6 +43,7 @@ def set_power_mode(mode: str):
         return
     pid = NVPMODEL_IDS.get(mode)
     if pid is None:
+        print(f"[sweep] no nvpmodel id for '{mode}'; leaving current mode")
         return
     try:
         subprocess.run(["sudo", "nvpmodel", "-m", str(pid)], check=False)
@@ -48,7 +52,16 @@ def set_power_mode(mode: str):
         print(f"[sweep] nvpmodel failed ({e}); leaving current mode")
 
 
-def measure_one(cfg, iters: int, warmup: int, period_ms: float) -> dict:
+def _save_trace(trace, cfg, rep: int):
+    os.makedirs(TRACE_DIR, exist_ok=True)
+    pd.DataFrame({
+        "t_s": trace.t,
+        "power_w": trace.p_total / 1000.0,
+        "temp_c": (trace.temp if trace.temp is not None else np.full(len(trace.t), np.nan)),
+    }).to_csv(f"{TRACE_DIR}/{cfg.tag()}_r{rep}.csv", index=False)
+
+
+def measure_one(cfg, iters, warmup, period_ms, rep=0, save_traces=True) -> dict:
     runner = make_runner(cfg)
     runner.load()
     if warmup:
@@ -57,6 +70,8 @@ def measure_one(cfg, iters: int, warmup: int, period_ms: float) -> dict:
         res = runner.train(iters) if cfg.mode == "train" else runner.run(iters)
     trace = logger.trace()
     feats = extract_features(trace, n_inferences=res.n_inferences)
+    if save_traces:
+        _save_trace(trace, cfg, rep)
 
     row = cfg.as_row()
     row.update(feats.as_row())
@@ -80,6 +95,8 @@ def main():
     ap.add_argument("--power-modes", nargs="*", default=None)
     ap.add_argument("--modes", nargs="*", default=None,
                     help='workload modes: "inference", "train", or both')
+    ap.add_argument("--save-traces", dest="save_traces", action="store_true", default=True)
+    ap.add_argument("--no-save-traces", dest="save_traces", action="store_false")
     ap.add_argument("--smoke", action="store_true", help="tiny fast sweep")
     args = ap.parse_args()
 
@@ -89,7 +106,7 @@ def main():
         spec.precisions = ["FP16", "INT8"]
         spec.batch_sizes = [1, 4]
         spec.power_modes = ["25W"]
-        spec.llm_gen_tokens = [16]     # keep the laptop smoke test fast
+        spec.llm_gen_tokens = [16]
         args.iters, args.warmup = 8, 2
     if args.models: spec.models = args.models
     if args.precisions: spec.precisions = args.precisions
@@ -99,7 +116,7 @@ def main():
 
     cfgs = list(spec.iter_configs())
     print(f"[sweep] board={config.detect_board()} jetson={IS_JETSON} "
-          f"configs={len(cfgs)} x{args.repeats} iters={args.iters}")
+          f"configs={len(cfgs)} x{args.repeats} iters={args.iters} save_traces={args.save_traces}")
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     rows, current_mode = [], None
@@ -108,7 +125,8 @@ def main():
             set_power_mode(cfg.power_mode)
             current_mode = cfg.power_mode
         for rep in range(args.repeats):
-            row = measure_one(cfg, args.iters, args.warmup, args.period_ms)
+            row = measure_one(cfg, args.iters, args.warmup, args.period_ms,
+                              rep=rep, save_traces=args.save_traces)
             row["repeat"] = rep
             rows.append(row)
         print(f"  [{i}/{len(cfgs)}] {cfg.tag():48s} "
@@ -119,6 +137,7 @@ def main():
     df = pd.DataFrame(rows)
     df.to_csv(args.out, index=False)
     print(f"[sweep] wrote {len(df)} rows -> {args.out}")
+    print(f"[sweep] raw traces -> {TRACE_DIR}/  (for power-over-time / energy-over-time figures)")
     print(f"[sweep] predictor targets present: {WaveformFeatures.target_names()}")
 
 

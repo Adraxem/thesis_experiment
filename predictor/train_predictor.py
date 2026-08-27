@@ -42,7 +42,7 @@ def _feature_frame(df: pd.DataFrame) -> pd.DataFrame:
     for _, r in df.iterrows():
         cfg = config.DeployConfig(
             model=r["model"], precision=r["precision"], batch_size=int(r["batch_size"]),
-            power_mode=r["power_mode"], schedule=r.get("schedule", "default"),
+            power_mode=r["power_mode"], schedule=r.get("schedule", "default"), mode=r.get("mode", "inference"),
             seq_len=int(r.get("seq_len", 128)), gen_tokens=int(r.get("gen_tokens", 64)),
         )
         feats.append(cfg.to_features())

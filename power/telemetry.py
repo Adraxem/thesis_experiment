@@ -1,19 +1,23 @@
 """
 power/telemetry.py — high-rate power/thermal sampling on the Jetson Orin (RQ1).
 
-Reads the on-board INA3221 rails via sysfs (fast, ~ms) and, in parallel, parses
-`tegrastats` for the GPU/SOC power fields and temperatures. On a non-Jetson host
-(your laptop / CI) it produces a *synthetic* waveform so the whole pipeline runs
-end-to-end before you have the board.
+Reads the on-board INA3221 rails via sysfs (fast, ~ms). On a non-Jetson host
+(laptop / CI) it produces a *synthetic* waveform so the pipeline runs end-to-end
+before hardware.
 
-Sampling note (matches the thesis scope): tegrastats/INA3221 sample at ~ms, so we
-capture PEAK power and THERMAL transients, not µs-scale di/dt. That caveat is
-intentional and documented in the proposal.
+CORRECTNESS NOTE (fixed):
+The INA3221 exposes several channels. On the Orin Nano these are typically
+VDD_IN (the TOTAL board input) plus VDD_CPU_GPU_CV and VDD_SOC (its components).
+VDD_IN already equals ~the sum of the component rails, so summing ALL discovered
+rails double-counts total power (you get ~2x reality). We therefore:
+  1) de-duplicate rails (the same physical channel can appear via several sysfs
+     symlinks), and
+  2) if a TOTAL/input rail is present, report it ALONE as p_total; otherwise sum
+     only the component ("leaf") rails.
+Per-rail values are always kept in the trace for inspection.
 
-Usage:
-    with PowerLogger(period_ms=5) as log:
-        run_inference(...)
-    trace = log.trace()          # -> PowerTrace(t, p_total, rails..., temp)
+Sampling note: INA3221 samples at ~ms, so we capture PEAK power and THERMAL
+transients, not us-scale di/dt. That caveat is intentional and documented.
 """
 from __future__ import annotations
 import glob
@@ -36,6 +40,10 @@ _HWMON_GLOBS = [
     "/sys/class/hwmon/hwmon*/",
 ]
 
+# A rail whose label denotes the TOTAL board input. It already equals ~the sum of
+# the component rails, so it must NOT be added to them. If found, we use it alone.
+_TOTAL_RAIL_RE = re.compile(r"(VDD_IN|POM.*IN|_IN$|^VIN$|TOTAL|SUM|SYS5V|CVB.*IN)", re.I)
+
 
 @dataclass
 class PowerTrace:
@@ -53,14 +61,17 @@ class PowerTrace:
 # ---------------------------------------------------------------------------
 # Real-device rail discovery
 # ---------------------------------------------------------------------------
-def _discover_rails() -> list[tuple[str, str]]:
-    """Return [(label, curr_input_path, ...)] -> we read power = in*curr."""
-    found = []
+def _discover_rails() -> list:
+    """Return [(label, curr_input_path, volt_input_path), ...], de-duplicated.
+
+    Multiple globs can resolve to the SAME hwmon device via different sysfs
+    symlinks; we key on the real path of the current file so each physical
+    channel is listed exactly once (this alone removes one source of the
+    double-counted total)."""
+    found, seen = [], set()
     for pattern in _HWMON_GLOBS:
         for base in glob.glob(pattern):
-            # newer kernels expose 'curr{n}_input' (mA) and 'in{n}_input' (mV)
-            labels = sorted(glob.glob(os.path.join(base, "*_label")))
-            for lab in labels:
+            for lab in sorted(glob.glob(os.path.join(base, "*_label"))):
                 try:
                     name = open(lab).read().strip()
                 except Exception:
@@ -71,9 +82,22 @@ def _discover_rails() -> list[tuple[str, str]]:
                 n = idx.group(1)
                 curr = os.path.join(base, f"curr{n}_input")
                 volt = os.path.join(base, f"in{n}_input")
-                if os.path.exists(curr) and os.path.exists(volt):
-                    found.append((name, curr, volt))
+                if not (os.path.exists(curr) and os.path.exists(volt)):
+                    continue
+                key = os.path.realpath(curr)
+                if key in seen:
+                    continue
+                seen.add(key)
+                found.append((name, curr, volt))
     return found
+
+
+def _select_total_rail(rails) -> str | None:
+    """If a TOTAL/input rail exists, return its label (used alone as p_total)."""
+    for name, _c, _v in rails:
+        if _TOTAL_RAIL_RE.search(name or ""):
+            return name
+    return None
 
 
 def _read_int(path: str) -> float:
@@ -118,30 +142,24 @@ def _synth_trace(duration_s: float, period_ms: float, cfg=None) -> PowerTrace:
 
     is_train = bool(cfg and getattr(cfg, "mode", "inference") == "train")
     if is_train:
-        # TRAINING regime: high sustained draw (fwd+bwd+opt) with periodic "sync"
-        # dips where a real cluster would stall on gradient all-reduce. This per-device
-        # pattern is the building block Part ii superposes across many GPUs.
         steps = 10
         phase = np.linspace(0, steps * 2 * np.pi, n)
-        compute = 0.82 + 0.10 * (np.sin(phase) > -0.7)     # mostly high
-        sync_dip = 0.35 * (np.abs(np.sin(phase / 2.0)) > 0.985)  # brief all-reduce stalls
+        compute = 0.82 + 0.10 * (np.sin(phase) > -0.7)
+        sync_dip = 0.35 * (np.abs(np.sin(phase / 2.0)) > 0.985)
         level = np.clip(compute - sync_dip, 0.25, 1.0)
         p = floor + (peak - floor) * level
     elif is_llm:
-        # prefill spike then decode ripple
         p[: n // 6] = peak * (0.9 + 0.1 * rng.random(n // 6))
         ripple = 0.6 + 0.25 * np.sin(np.linspace(0, 20 * np.pi, n - n // 6))
         p[n // 6:] = floor + (peak - floor) * ripple
     else:
-        # periodic inference bursts
         burst = (np.sin(np.linspace(0, 12 * np.pi, n)) > 0.2).astype(float)
         p = floor + (peak - floor) * burst
 
-    p += rng.normal(0, peak * 0.03, n)              # measurement noise
+    p += rng.normal(0, peak * 0.03, n)
     p = np.clip(p, floor * 0.8, None)
 
-    # slow thermal ramp toward a plateau
-    temp0, tmax = 38.0, 38.0 + (0.55 if is_train else 0.35) * budget  # training ramps hotter
+    temp0, tmax = 38.0, 38.0 + (0.55 if is_train else 0.35) * budget
     temp = tmax - (tmax - temp0) * np.exp(-t / max(duration_s / 2, 1e-3))
     temp += rng.normal(0, 0.2, n)
 
@@ -158,12 +176,15 @@ class PowerLogger:
         self.cfg = cfg
         self.use_tegrastats = use_tegrastats
         self._rails = _discover_rails() if IS_JETSON else []
-        self._samples: list[tuple[float, float, dict, float]] = []
+        self._total_rail = _select_total_rail(self._rails) if self._rails else None
+        self._samples = []
         self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
+        self._thread = None
         self._t0 = 0.0
+        if IS_JETSON and self._rails:
+            names = [r[0] for r in self._rails]
+            print(f"[power] rails={names}  total_rail={self._total_rail or 'SUM(leaf rails)'}")
 
-    # context manager
     def __enter__(self):
         self.start()
         return self
@@ -176,21 +197,25 @@ class PowerLogger:
         if IS_JETSON and self._rails:
             self._thread = threading.Thread(target=self._sample_loop, daemon=True)
             self._thread.start()
-        # if not on Jetson we synthesize at stop() based on elapsed time
 
     def _sample_loop(self):
         dt = self.period_ms / 1000.0
         while not self._stop.is_set():
             now = time.perf_counter() - self._t0
-            total = 0.0
             rails = {}
             for name, curr_p, volt_p in self._rails:
                 mA = _read_int(curr_p)
                 mV = _read_int(volt_p)
                 mW = (mA * mV) / 1000.0 if (mA == mA and mV == mV) else float("nan")
                 rails[name] = mW
-                if mW == mW:
-                    total += mW
+            # p_total: the TOTAL rail alone if present (avoids double-counting),
+            # else the sum of the component rails.
+            if self._total_rail is not None:
+                total = rails.get(self._total_rail, float("nan"))
+                if not (total == total):
+                    total = sum(v for v in rails.values() if v == v)
+            else:
+                total = sum(v for v in rails.values() if v == v)
             self._samples.append((now, total, rails, _read_max_temp()))
             time.sleep(dt)
 
@@ -218,9 +243,8 @@ def tegrastats_available() -> bool:
 
 
 if __name__ == "__main__":
-    # quick self-test (synthetic on a laptop)
     with PowerLogger(period_ms=5) as log:
         time.sleep(0.5)
     tr = log.trace()
     print(f"source={tr.source} samples={len(tr.t)} dur={tr.duration_s():.2f}s "
-          f"peak={tr.p_total.max():.0f} mW temp_max={np.nanmax(tr.temp):.1f} C")
+          f"peak={tr.p_total.max():.0f} mW")
