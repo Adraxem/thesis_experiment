@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use this software or its results, please cite it as below."
+title: "Transient- and Peak-Power-Aware Deployment of ML Inference on Edge GPUs"
+authors:
+  - family-names: "Yildiz"
+    given-names: "Ardacan"
+    affiliation: "The University of Akron"
+type: software
+license: MIT
+repository-code: "https://github.com/Adraxem/thesis_experiment"
+date-released: "2026-08-27"
+keywords:
+  - edge-ai
+  - jetson-orin
+  - power-measurement
+  - inference
+  - quantization

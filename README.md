@@ -1,5 +1,10 @@
 # thesis_experiment
 
+![CI](https://github.com/Adraxem/thesis_experiment/actions/workflows/ci.yml/badge.svg)
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+![Python](https://img.shields.io/badge/python-3.12-blue.svg)
+
+
 Experiment scaffold for **"Managing Power Behavior of ML Inference: From Edge Device
 to the Data Centers"** (Yildiz, M.Sc. proposal v4). Target device: **NVIDIA Jetson
 Orin Nano**. Small LLM: **Llama-3.2-1B**.
