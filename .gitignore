@@ -2,8 +2,14 @@ __pycache__/
 *.pyc
 *.bak
 *.onnx
+_archive/
+_prev_*/
+figures_current/
+results_orin*/
+waveforms_orin*.csv
+train_epochs_orin*.csv
 results/traces/
-data/datasets/
 data/train_traces/
+data/datasets/
 results/checkpoints/
 thesisenv/

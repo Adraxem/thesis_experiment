@@ -3,11 +3,15 @@ figures.py — publication-grade, RIGOROUS figures from measured data only.
 No synthetic fallbacks, no interpolated surfaces. Every figure uses real measured
 rows/traces or is skipped with a loud note. Run: python3 figures.py
 """
-import os, glob
+import os, glob, sys, site
+# Orin has two matplotlibs (system + pip --user); force the user copy's mpl_toolkits
+# to the front so the 3D module doesn't load the stale system one and crash on import.
+_us = site.getusersitepackages()
+sys.path = [_us] + [p for p in sys.path if p != _us]
 import numpy as np, pandas as pd
 import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D  # noqa
+# NOTE: no explicit Axes3D import; add_subplot(projection="3d") registers it.
 
 plt.rcParams.update({"font.size":11,"axes.grid":True,"grid.alpha":0.25,
     "axes.spines.top":False,"axes.spines.right":False,
@@ -119,9 +123,15 @@ def f_power_over_time():
 
 def main():
     d=load(); print(f"[figures] {len(d)} real rows | models={sorted(d.model.unique())} | precisions={sorted(d.precision.unique())}")
-    f_model_compare(d,"p_peak_w","peak power (W)","compare_peak.png")
-    f_model_compare(d,"energy_per_inf_j","energy/iter (J)","compare_energy.png")
-    f_precision(d); f_scatter3d(d); f_grid_surface(d); f_per_epoch(); f_power_over_time()
+    for name, fn in [("compare_peak", lambda: f_model_compare(d,"p_peak_w","peak power (W)","compare_peak.png")),
+                     ("compare_energy", lambda: f_model_compare(d,"energy_per_inf_j","energy/iter (J)","compare_energy.png")),
+                     ("precision", lambda: f_precision(d)),
+                     ("scatter_3d", lambda: f_scatter3d(d)),
+                     ("grid_surface", lambda: f_grid_surface(d)),
+                     ("per_epoch", f_per_epoch),
+                     ("power_over_time", f_power_over_time)]:
+        try: fn()
+        except Exception as e: print(f"  [!] {name} failed: {e}")
     print("[figures] done ->",FIG)
 
 if __name__=="__main__": main()

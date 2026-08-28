@@ -6,6 +6,18 @@
 set -uo pipefail
 cd "$(cd "$(dirname "$0")" && pwd)"; echo ">>> repo: $PWD"
 
+# --- clean slate so THIS run is easy to capture: move any previous run aside ---
+STAMP=$(date +%Y%m%d_%H%M)
+if [ -d results ] || [ -f data/waveforms.csv ] || [ -f data/train_epochs.csv ]; then
+  mkdir -p "_prev_$STAMP"
+  [ -d results ] && mv results "_prev_$STAMP/" 2>/dev/null
+  [ -f data/waveforms.csv ] && mv data/waveforms.csv "_prev_$STAMP/" 2>/dev/null
+  [ -d data/train_traces ] && mv data/train_traces "_prev_$STAMP/" 2>/dev/null
+  [ -f data/train_epochs.csv ] && mv data/train_epochs.csv "_prev_$STAMP/" 2>/dev/null
+  echo ">>> archived previous run -> _prev_$STAMP/  (this run starts clean)"
+fi
+mkdir -p results/figures results/traces
+
 # ----------------------------- SCOPE (edit to taste) -----------------------------
 MODELS="resnet18 resnet50 mobilenet_v3_large"   # supported vision models
 PRECS="FP16 FP32"                               # real precision axis (INT8 needs TensorRT: later)
@@ -27,7 +39,6 @@ echo ">>> caching sudo for nvpmodel; enter password if asked:"; sudo -v
 sudo nvpmodel -m 2 || true; sudo jetson_clocks || true
 
 # fresh per-epoch file so old mock rows don't pollute fig train_per_epoch
-[ -f data/train_epochs.csv ] && mv data/train_epochs.csv data/train_epochs.prev.csv 2>/dev/null || true
 
 step "RQ1 sweep (inference + training, real traces)" \
   python3 run_sweep.py --iters "$ITERS" --repeats "$REPS" --period-ms 5 \
