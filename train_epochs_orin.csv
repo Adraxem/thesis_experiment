@@ -1,0 +1,10 @@
+model,precision,mode,batch_size,power_mode,epoch,loss,steps,epoch_time_s,p_avg_w,p_peak_w,energy_j,thermal_ramp_c_per_s,temp_max_c,trace_source,backend
+resnet18,FP16,train,64,MAXN,0,2.3336,20,0.401,46.765,53.54,18.219,30.6344,48.42,mock,stub-train
+resnet18,FP16,train,64,MAXN,1,1.77581,20,0.4,43.828,51.927,17.153,15.8818,54.3,mock,stub-train
+resnet18,FP16,train,64,MAXN,2,1.35208,20,0.401,46.405,53.217,17.629,9.2328,56.87,mock,stub-train
+resnet18,FP16,train,64,MAXN,0,2.46079,60,18.922,18.148,20.423,343.506,0.5605,56.38,ina3221,torch-cuda-FP16
+resnet18,FP16,train,64,MAXN,1,1.94264,60,16.692,19.563,20.112,325.089,0.2394,59.06,ina3221,torch-cuda-FP16
+resnet18,FP16,train,64,MAXN,2,1.80245,60,16.709,19.6,20.19,326.763,0.1926,61.09,ina3221,torch-cuda-FP16
+mobilenet_v3_large,FP16,train,64,MAXN,0,2.11378,60,22.689,17.077,18.31,386.599,0.2417,61.28,ina3221,torch-cuda-FP16
+mobilenet_v3_large,FP16,train,64,MAXN,1,1.85931,60,21.239,17.837,18.427,376.966,0.0778,62.38,ina3221,torch-cuda-FP16
+mobilenet_v3_large,FP16,train,64,MAXN,2,1.72761,60,21.274,17.84,18.31,378.616,0.0635,63.03,ina3221,torch-cuda-FP16
