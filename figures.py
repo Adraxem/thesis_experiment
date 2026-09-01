@@ -22,10 +22,10 @@ PAL={"resnet18":"#3B6EA5","resnet50":"#8C4A9C","mobilenet_v3_large":"#C1662F",
 def col(m): return PAL.get(m,"#555555")
 PB={"7W":7,"15W":15,"25W":25,"MAXN":40}
 
-def load():
-    d=pd.read_csv("data/waveforms.csv")
+def load(path="data/waveforms.csv"):
+    d=pd.read_csv(path)
     d=d[d["trace_source"]=="ina3221"]
-    if not len(d): raise SystemExit("[figures] no real (ina3221) rows in data/waveforms.csv")
+    if not len(d): raise SystemExit(f"[figures] no real (ina3221) rows in {path}")
     d["pbudget"]=d.power_mode.map(PB); return d
 
 def f_model_compare(d,metric,ylabel,fname,mode="inference"):
@@ -122,7 +122,13 @@ def f_power_over_time():
     fig.tight_layout();fig.savefig(f"{FIG}/power_over_time.png",dpi=150);plt.close(fig);print("  wrote power_over_time.png")
 
 def main():
-    d=load(); print(f"[figures] {len(d)} real rows | models={sorted(d.model.unique())} | precisions={sorted(d.precision.unique())}")
+    import argparse
+    ap=argparse.ArgumentParser()
+    ap.add_argument("--data",default="data/waveforms.csv",help="measured CSV to plot (real ina3221 rows)")
+    ap.add_argument("--out-dir",default="results/figures",help="where to write the PNGs")
+    args=ap.parse_args()
+    global FIG; FIG=args.out_dir; os.makedirs(FIG,exist_ok=True)
+    d=load(args.data); print(f"[figures] {len(d)} real rows | models={sorted(d.model.unique())} | precisions={sorted(d.precision.unique())}")
     for name, fn in [("compare_peak", lambda: f_model_compare(d,"p_peak_w","peak power (W)","compare_peak.png")),
                      ("compare_energy", lambda: f_model_compare(d,"energy_per_inf_j","energy/iter (J)","compare_energy.png")),
                      ("precision", lambda: f_precision(d)),

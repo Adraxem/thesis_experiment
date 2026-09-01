@@ -56,7 +56,11 @@ def main():
     ap.add_argument("--save-traces",dest="save_traces",action="store_true",default=True)
     ap.add_argument("--no-save-traces",dest="save_traces",action="store_false")
     ap.add_argument("--smoke",action="store_true")
+    ap.add_argument("--engine",choices=["torch","trt"],default="torch",
+                    help="vision backend: torch (FP32/FP16 only) or trt (REAL INT8/INT4 via TensorRT/trtexec)")
     args=ap.parse_args()
+    os.environ["VISION_ENGINE"]=args.engine
+    print(f"[sweep] vision engine = {args.engine}"+(" (INT8/INT4 real via TensorRT)" if args.engine=="trt" else " (FP32/FP16 only; INT8/INT4 will be refused)"))
 
     spec=config.SweepSpec()
     if args.smoke:

@@ -13,3 +13,6 @@ data/train_traces/
 data/datasets/
 results/checkpoints/
 thesisenv/
+results/engines/
+*.engine
+*_fp32.onnx
